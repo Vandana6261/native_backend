@@ -1,10 +1,7 @@
-import { createJob as createJobRepository } from '../repositories/job.repository.js';
+import { createJob as createJobRepository, getAllJobs as getAllJobsRepository, getJobById as getJobByIdRepository, updateJob as updateJobRepository, deleteJob as deleteJobRepository, searchJobs as searchJobsRepository } from '../repositories/job.repository.js';
 
 /**
  * Post a new job opportunity (Recruiter only)
- * @param {string} recruiterId - ID of the recruiter posting the job
- * @param {Object} jobData - Raw job posting payload from request body
- * @returns {Promise<Object>} Created job document
  */
 export const postJob = async (recruiterId, jobData) => {
   if (!recruiterId) {
@@ -12,7 +9,6 @@ export const postJob = async (recruiterId, jobData) => {
     error.statusCode = 400;
     throw error;
   }
-
   if (!jobData || typeof jobData !== 'object') {
     const error = new Error('Job data payload is required');
     error.statusCode = 400;
@@ -90,4 +86,95 @@ export const postJob = async (recruiterId, jobData) => {
 
   const job = await createJobRepository(payload);
   return job;
+};
+
+/**
+ * Retrieve all job postings (public)
+ * @returns {Promise<Array>} List of job documents
+ */
+export const getAllJobs = async () => {
+  const jobs = await getAllJobsRepository();
+  return jobs;
+};
+
+/**
+ * Update a job (owner only)
+ * @param {string} recruiterId - ID of the authenticated recruiter
+ * @param {string} jobId - ID of the job to update
+ * @param {Object} updateData - Fields to update
+ * @returns {Promise<Object>} Updated job document
+ */
+export const updateJob = async (recruiterId, jobId, updateData) => {
+  if (!recruiterId) {
+    const error = new Error('Recruiter ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!jobId) {
+    const error = new Error('Job ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const job = await getJobByIdRepository(jobId);
+  if (!job) {
+    const error = new Error('Job not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (job.recruiter.toString() !== recruiterId) {
+    const error = new Error('Unauthorized: you are not the owner of this job');
+    error.statusCode = 403;
+    throw error;
+  }
+  const updatedJob = await updateJobRepository(jobId, updateData);
+  return updatedJob;
+};
+
+/**
+ * Delete a job (owner only)
+ * @param {string} recruiterId - ID of the authenticated recruiter
+ * @param {string} jobId - ID of the job to delete
+ * @returns {Promise<Object>} Deleted job document
+ */
+export const deleteJob = async (recruiterId, jobId) => {
+  if (!recruiterId) {
+    const error = new Error('Recruiter ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!jobId) {
+    const error = new Error('Job ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const job = await getJobByIdRepository(jobId);
+  if (!job) {
+    const error = new Error('Job not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (job.recruiter.toString() !== recruiterId) {
+    const error = new Error('Unauthorized: you are not the owner of this job');
+    error.statusCode = 403;
+    throw error;
+  }
+  const deletedJob = await deleteJobRepository(jobId);
+  return deletedJob;
+};
+
+/**
+ * Search jobs by title and/or location (public)
+ * @param {Object} filters - May contain title and/or location strings
+ * @returns {Promise<Array>} List of matching job documents
+ */
+export const searchJobs = async (filters) => {
+  // Ensure filters is an object
+  if (!filters || typeof filters !== 'object') {
+    const error = new Error('Filters must be provided as an object');
+    error.statusCode = 400;
+    throw error;
+  }
+  // Delegates to repository
+  const jobs = await searchJobsRepository(filters);
+  return jobs;
 };

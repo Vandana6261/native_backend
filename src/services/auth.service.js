@@ -24,6 +24,7 @@ import {
  * @param {string} email - Target email address
  */
 export const requestOtp = async (email) => {
+  console.log("in service")
   if (!email || typeof email !== 'string') {
     const error = new Error('A valid email address is required');
     error.statusCode = 400;
@@ -42,6 +43,7 @@ export const requestOtp = async (email) => {
 
   // 1. Generate 6-digit cryptographically secure OTP (using crypto.randomInt)
   const otp = generateOtp(6);
+  console.log(otp, "otp")
 
   // 2. Set OTP expiration time (10 minutes from now)
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -135,8 +137,8 @@ export const registerUser = async ({ email, userName, password, role }) => {
     throw error;
   }
 
-  if (!role || !['recruiter', 'student'].includes(role.toLowerCase())) {
-    const error = new Error('Role must be either "recruiter" or "student"');
+  if (!role || !['recruiter', 'candidate'].includes(role.toLowerCase())) {
+    const error = new Error('Role must be either "recruiter" or "candidate"');
     error.statusCode = 400;
     throw error;
   }
