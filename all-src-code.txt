@@ -1,0 +1,1727 @@
+
+============================================================
+FILE: app.js
+============================================================
+
+import express from 'express';
+import cors from 'cors';
+import routes from './routes/index.js';
+import { notFound } from './middlewares/notFound.middleware.js';
+import { errorHandler } from './middlewares/error.middleware.js';
+
+const app = express();
+
+// Core Middlewares
+app.use(cors());
+app.use(express.json());
+
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+})
+
+// Root welcome route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Welcome to Backend Native API Server',
+    version: '1.0.0',
+    documentation: '/api/health',
+  });
+});
+
+// Mounting domain routes
+app.use('/api', routes);
+
+// Error Middlewares
+app.use(notFound);
+app.use(errorHandler);
+
+export default app;
+
+
+
+
+============================================================
+FILE: config/db.js
+============================================================
+
+import mongoose from 'mongoose';
+
+/**
+ * Connect to MongoDB database via Mongoose
+ */
+export const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+
+    console.log(`[Database] MongoDB Connected successfully to host: ${conn.connection.host}`);
+  } catch (error) {
+    console.error(`[Database] Connection Error: ${error.message}`);
+    // Notice: We don't hard exit process here so that the app can still respond to health checks if DB is down or pending string replacement
+  }
+};
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('[Database] MongoDB disconnected');
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error(`[Database] MongoDB connection error: ${err}`);
+});
+
+
+
+
+============================================================
+FILE: controllers/auth.controller.js
+============================================================
+
+import {
+  requestOtp as requestOtpService,
+  verifyOtp as verifyOtpService,
+  registerUser as registerUserService,
+  refreshAccessToken as refreshAccessTokenService,
+} from '../services/auth.service.js';
+
+/**
+ * POST /api/auth/request-otp
+ * Request OTP for signup / authentication
+ */
+export const requestOtp = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const result = await requestOtpService(email);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+      signupSessionToken: result.signupSessionToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/auth/verify-otp
+ * Verify OTP code submitted by user (requires signupSessionToken)
+ */
+export const verifyOtp = async (req, res, next) => {
+  try {
+    const { otp } = req.body;
+    const email = req.email; // From verifySignupSession middleware
+
+    const result = await verifyOtpService(email, otp);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/auth/register
+ * Complete user registration after OTP verification (requires signupSessionToken)
+ */
+export const register = async (req, res, next) => {
+  try {
+    const { userName, password, role } = req.body;
+    const email = req.email; // From verifySignupSession middleware
+
+    const result = await registerUserService({
+      email,
+      userName,
+      password,
+      role,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'User registered successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/auth/refresh-token
+ * Generate a new Access Token using a verified Refresh Token
+ */
+export const refreshToken = async (req, res, next) => {
+  try {
+    const userId = req.userId; // From verifyRefreshToken middleware
+    const incomingRefreshToken = req.refreshToken; // From verifyRefreshToken middleware
+
+    const result = await refreshAccessTokenService(userId, incomingRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: 'New access token generated successfully.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
+
+============================================================
+FILE: controllers/health.controller.js
+============================================================
+
+import { checkHealth } from '../services/health.service.js';
+
+/**
+ * Handle GET /api/v1/health request
+ */
+export const getHealth = async (req, res, next) => {
+  try {
+    const healthStatus = await checkHealth();
+    return res.status(200).json({
+      success: true,
+      message: 'Backend Native Server status retrieved successfully',
+      data: healthStatus,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
+
+============================================================
+FILE: controllers/job.controller.js
+============================================================
+
+import { postJob as postJobService, getAllJobs as getAllJobsService, updateJob as updateJobService, deleteJob as deleteJobService, searchJobs as searchJobsService } from '../services/job.service.js';
+
+/**
+ * POST /api/jobs
+ * Create / Post a new job opportunity (Recruiter only)
+ */
+export const createJob = async (req, res, next) => {
+  try {
+    const recruiterId = req.userId; // Extracted from verified Access Token by verifyAccessToken middleware
+    const jobData = req.body;
+
+    const job = await postJobService(recruiterId, jobData);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Job posted successfully.',
+      data: job,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/jobs
+ * Retrieve all job postings (public)
+ */
+export const getAllJobs = async (req, res, next) => {
+  try {
+    const jobs = await getAllJobsService();
+    return res.status(200).json({
+      success: true,
+      data: jobs,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/jobs/:id
+ * Update a specific job (owner only)
+ */
+export const updateJob = async (req, res, next) => {
+  try {
+    const recruiterId = req.userId;
+    const jobId = req.params.id;
+    const updateData = req.body;
+
+    const updatedJob = await updateJobService(recruiterId, jobId, updateData);
+    return res.status(200).json({
+      success: true,
+      data: updatedJob,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * DELETE /api/jobs/:id
+ * Delete a specific job (owner only)
+ */
+export const deleteJob = async (req, res, next) => {
+  try {
+    const recruiterId = req.userId;
+    const jobId = req.params.id;
+    const deletedJob = await deleteJobService(recruiterId, jobId);
+    return res.status(200).json({
+      success: true,
+      data: deletedJob,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/jobs/search
+ * Search for jobs by title and/or location (public)
+ */
+export const searchJobs = async (req, res, next) => {
+  try {
+    const { title, location } = req.query;
+    const filters = {};
+    if (title) filters.title = title;
+    if (location) filters.location = location;
+    const jobs = await searchJobsService(filters);
+    return res.status(200).json({
+      success: true,
+      data: jobs,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+
+
+============================================================
+FILE: middlewares/auth.middleware.js
+============================================================
+
+import {
+  verifySignupToken,
+  verifyAccessToken as verifyAccessTokenUtil,
+  verifyRefreshToken as verifyRefreshTokenUtil,
+} from '../utils/jwt.util.js';
+
+/**
+ * Middleware to verify Signup Session JWT Token before OTP verification or signup completion
+ */
+export const verifySignupSession = (req, res, next) => {
+  try {
+    let token = null;
+
+    // 1. Check Authorization header (Bearer <token>)
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    }
+
+    // 2. Fallback to x-signup-token header or req.body
+    if (!token) {
+      token = req.headers['x-signup-token'] || req.body?.signupSessionToken;
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Signup session token is missing. Please request an OTP first.',
+      });
+    }
+
+    // 3. Verify token signature and expiration
+    const decoded = verifySignupToken(token);
+
+    if (!decoded || !decoded.email) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid signup session token payload.',
+      });
+    }
+
+    // 4. Attach decoded signup session and email to request object
+    req.email = decoded.email;
+    req.signupSession = decoded;
+
+    next();
+  } catch (error) {
+    console.error('[AuthMiddleware] Signup Session verification failed:', error.message);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired signup session token.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Middleware to verify JWT Access Token for protected routes
+ */
+export const verifyAccessToken = (req, res, next) => {
+  try {
+    let token = null;
+
+    // 1. Check Authorization header (Bearer <token>)
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    }
+
+    // 2. Fallback to x-access-token header
+    if (!token) {
+      token = req.headers['x-access-token'];
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access token is required. Please login.',
+      });
+    }
+
+    // 3. Verify access token signature and expiration
+    const decoded = verifyAccessTokenUtil(token);
+
+    // 4. Attach decoded user payload to request object
+    req.user = decoded;
+    req.userId = decoded.id;
+    req.userRole = decoded.role;
+    req.userEmail = decoded.email;
+
+    next();
+  } catch (error) {
+    console.error('[AuthMiddleware] Access Token verification failed:', error.message);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired access token. Please login again.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Middleware to verify JWT Refresh Token (e.g. for token refresh endpoint)
+ */
+export const verifyRefreshToken = (req, res, next) => {
+  try {
+    let token = null;
+
+    // 1. Check body (req.body.refreshToken)
+    if (req.body && req.body.refreshToken) {
+      token = req.body.refreshToken;
+    }
+
+    // 2. Fallback to x-refresh-token header
+    if (!token) {
+      token = req.headers['x-refresh-token'];
+    }
+
+    // 3. Fallback to Authorization header (Bearer <token>)
+    if (!token) {
+      const authHeader = req.headers.authorization || req.headers.Authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token is missing. Please provide a refresh token.',
+      });
+    }
+
+    // 4. Verify refresh token signature and expiration
+    const decoded = verifyRefreshTokenUtil(token);
+
+    // 5. Attach decoded user payload and raw refresh token to request object
+    req.user = decoded;
+    req.userId = decoded.id;
+    req.userEmail = decoded.email;
+    req.refreshToken = token;
+
+    next();
+  } catch (error) {
+    console.error('[AuthMiddleware] Refresh Token verification failed:', error.message);
+    return res.status(401).json({
+      success: false,
+      message: 'Invalid or expired refresh token. Please login again.',
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Middleware to restrict access based on user roles (e.g. 'recruiter', 'student')
+ * @param  {...string} allowedRoles - List of allowed roles
+ */
+export const authorizeRoles = (...allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.userRole || !allowedRoles.includes(req.userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Role '${req.userRole || 'unknown'}' is not authorized to access this route.`,
+      });
+    }
+    next();
+  };
+};
+
+
+
+
+============================================================
+FILE: middlewares/error.middleware.js
+============================================================
+
+/**
+ * Centralized Global Error Handling Middleware
+ */
+export const errorHandler = (err, req, res, next) => {
+  const statusCode = err.statusCode || (res.statusCode === 200 ? 500 : res.statusCode);
+  
+  res.status(statusCode).json({
+    success: false,
+    message: err.message || 'Internal Server Error',
+    stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+  });
+};
+
+
+
+
+
+============================================================
+FILE: middlewares/notFound.middleware.js
+============================================================
+
+/**
+ * 404 Not Found Middleware
+ */
+export const notFound = (req, res, next) => {
+  const error = new Error(`Route Not Found - ${req.originalUrl}`);
+  res.status(404);
+  next(error);
+};
+
+
+
+
+============================================================
+FILE: models/health.model.js
+============================================================
+
+import mongoose from 'mongoose';
+
+const healthSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      required: true,
+      default: 'UP',
+    },
+    message: {
+      type: String,
+      required: true,
+    },
+    checkedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const HealthModel = mongoose.model('Health', healthSchema);
+
+
+
+
+============================================================
+FILE: models/job.model.js
+============================================================
+
+import mongoose from 'mongoose';
+
+const jobSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: [true, 'Job title is required'],
+      trim: true,
+    },
+    companyName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    companyWebsite: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    contactEmail: {
+      type: String,
+      required: [true, 'Contact email is required'],
+      trim: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/i, 'Please provide a valid contact email address'],
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    employmentType: {
+      type: String,
+      trim: true,
+      default: 'Full-time',
+      enum: {
+        values: ['Full-time', 'Part-time', 'Contract', 'Internship', 'Remote'],
+        message: '{VALUE} is not a valid employment type',
+      },
+    },
+    experience: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    salary: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    skills: {
+      type: [String],
+      required: [true, 'Skills are required'],
+      validate: {
+        validator: function (val) {
+          return Array.isArray(val) && val.length > 0 && val.some((s) => s && s.trim().length > 0);
+        },
+        message: 'At least one mandatory skill must be specified',
+      },
+    },
+    description: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    applicationStartDate: {
+      type: Date,
+      required: [true, 'Application start date is required'],
+    },
+    applicationDeadline: {
+      type: Date,
+      required: [true, 'Application deadline is required'],
+      validate: {
+        validator: function (value) {
+          if (!this.applicationStartDate) return true;
+          return new Date(value) > new Date(this.applicationStartDate);
+        },
+        message: 'Application deadline must be after application start date',
+      },
+    },
+    recruiter: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Recruiter user reference is required'],
+      index: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const JobModel = mongoose.model('Job', jobSchema);
+
+
+
+
+============================================================
+FILE: models/otp.model.js
+============================================================
+
+import mongoose from 'mongoose';
+
+const otpSchema = new mongoose.Schema(
+  {
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      trim: true,
+      index: true,
+    },
+    otp: {
+      type: String,
+      required: [true, 'OTP is required'],
+    },
+    expiresAt: {
+      type: Date,
+      required: true,
+    },
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// TTL Index: MongoDB automatically purges document when current time reaches expiresAt
+otpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+export const OtpModel = mongoose.model('Otp', otpSchema);
+
+
+
+
+============================================================
+FILE: models/user.model.js
+============================================================
+
+import mongoose from 'mongoose';
+
+const userSchema = new mongoose.Schema(
+  {
+    userName: {
+      type: String,
+      required: [true, 'User name is required'],
+      trim: true,
+    },
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      trim: true,
+      index: true,
+    },
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      select: false, // Do not include password in queries by default
+    },
+    role: {
+      type: String,
+      required: [true, 'Role is required'],
+      enum: {
+        values: ['recruiter', 'candidate'],
+        message: '{VALUE} is not a valid role. Allowed roles are: recruiter, student',
+      },
+    },
+    refreshToken: {
+      type: String,
+      default: null,
+    },
+    isVerified: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const UserModel = mongoose.model('User', userSchema);
+
+
+
+
+============================================================
+FILE: repositories/health.repository.js
+============================================================
+
+import { HealthModel } from '../models/health.model.js';
+
+/**
+ * Log a new health check entry to database
+ */
+export const createLog = async (data) => {
+  return await HealthModel.create(data);
+};
+
+/**
+ * Retrieve the latest health check log
+ */
+export const getLatestLog = async () => {
+  return await HealthModel.findOne().sort({ createdAt: -1 });
+};
+
+/**
+ * Count total log records
+ */
+export const countLogs = async () => {
+  return await HealthModel.countDocuments();
+};
+
+
+
+
+============================================================
+FILE: repositories/job.repository.js
+============================================================
+
+import { JobModel } from '../models/job.model.js';
+
+/**
+ * Create a new job document in the database
+ * @param {Object} jobData - Job fields including recruiter ID
+ * @returns {Promise<Object>} Created job document
+ */
+export const createJob = async (jobData) => {
+  return await JobModel.create(jobData);
+};
+
+/**
+ * Retrieve all job documents from the database
+ * @returns {Promise<Array>} List of job documents
+ */
+export const getAllJobs = async () => {
+  return await JobModel.find({});
+};
+
+/**
+ * Retrieve a single job by its ID
+ * @param {String} jobId - MongoDB ObjectId of the job
+ * @returns {Promise<Object|null>} Job document or null if not found
+ */
+export const getJobById = async (jobId) => {
+  return await JobModel.findById(jobId);
+};
+
+/**
+ * Search jobs by title and/or location (case-insensitive partial match)
+ * @param {Object} filters - May contain title and/or location strings
+ * @returns {Promise<Array>} List of matching job documents
+ */
+export const searchJobs = async (filters) => {
+  const query = {};
+  if (filters.title) {
+    query.title = { $regex: filters.title, $options: 'i' };
+  }
+  if (filters.location) {
+    query.location = { $regex: filters.location, $options: 'i' };
+  }
+  return await JobModel.find(query);
+};
+
+
+/**
+ * Update a job document by its ID
+ * @param {String} jobId - MongoDB ObjectId of the job
+ * @param {Object} updateData - Fields to update
+ * @returns {Promise<Object|null>} Updated job document or null if not found
+ */
+export const updateJob = async (jobId, updateData) => {
+  return await JobModel.findByIdAndUpdate(jobId, updateData, { new: true });
+};
+
+/**
+ * Delete a job document by its ID
+ * @param {String} jobId - MongoDB ObjectId of the job
+ * @returns {Promise<Object|null>} Deleted job document or null if not found
+ */
+export const deleteJob = async (jobId) => {
+  return await JobModel.findByIdAndDelete(jobId);
+};
+
+
+
+
+============================================================
+FILE: repositories/otp.repository.js
+============================================================
+
+import { OtpModel } from '../models/otp.model.js';
+
+/**
+ * Remove previous existing OTPs for email and create a new OTP record
+ */
+export const createOrReplaceOtp = async ({ email, otp, expiresAt }) => {
+  console.log("in repo");
+  // Find any existing OTPs for this email
+  const existingOtps = await OtpModel.find({ email });
+  if (existingOtps && existingOtps.length > 0) {
+    await OtpModel.deleteMany({ email });
+    console.log(`Deleted ${existingOtps.length} existing OTP(s) for ${email}`);
+  }
+  console.log("14 repo")
+  // Create new OTP record
+  return await OtpModel.create({
+    email,
+    otp,
+    expiresAt,
+  });
+};
+
+/**
+ * Find latest active OTP by email
+ */
+export const findOtpByEmail = async (email) => {
+  return await OtpModel.findOne({ email }).sort({ createdAt: -1 });
+};
+
+/**
+ * Mark OTP as verified
+ */
+export const markAsVerified = async (id) => {
+  return await OtpModel.findByIdAndUpdate(id, { verified: true }, { new: true });
+};
+
+/**
+ * Delete OTP records for an email address
+ */
+export const deleteOtpsByEmail = async (email) => {
+  return await OtpModel.deleteMany({ email });
+};
+
+
+
+
+============================================================
+FILE: repositories/user.repository.js
+============================================================
+
+import { UserModel } from '../models/user.model.js';
+
+/**
+ * Create a new user record in database
+ */
+export const createUser = async ({ userName, email, password, role, refreshToken = null }) => {
+  return await UserModel.create({
+    userName,
+    email,
+    password,
+    role,
+    refreshToken,
+    isVerified: true,
+  });
+};
+
+/**
+ * Find user by email address
+ */
+export const findUserByEmail = async (email) => {
+  return await UserModel.findOne({ email });
+};
+
+/**
+ * Find user by ID
+ */
+export const findUserById = async (id) => {
+  return await UserModel.findById(id);
+};
+
+/**
+ * Save / update refresh token for a user
+ */
+export const updateRefreshToken = async (userId, refreshToken) => {
+  return await UserModel.findByIdAndUpdate(
+    userId,
+    { refreshToken },
+    { new: true }
+  );
+};
+
+
+
+
+============================================================
+FILE: routes/auth.routes.js
+============================================================
+
+import { Router } from 'express';
+import { requestOtp, verifyOtp, register, refreshToken } from '../controllers/auth.controller.js';
+import { verifySignupSession, verifyRefreshToken } from '../middlewares/auth.middleware.js';
+
+const router = Router();
+
+// POST /api/auth/request-otp - Request OTP and receive signupSessionToken
+router.post('/request-otp', requestOtp);
+
+// POST /api/auth/verify-otp - Verify OTP code (requires signupSessionToken)
+router.post('/verify-otp', verifySignupSession, verifyOtp);
+
+// POST /api/auth/register - Complete user registration (requires signupSessionToken)
+router.post('/register', verifySignupSession, register);
+
+// POST /api/auth/refresh-token - Refresh Access Token (requires valid Refresh Token)
+router.post('/refresh-token', verifyRefreshToken, refreshToken);
+
+export default router;
+
+
+
+
+============================================================
+FILE: routes/health.routes.js
+============================================================
+
+import { Router } from 'express';
+import { getHealth } from '../controllers/health.controller.js';
+
+const router = Router();
+
+// GET /api/v1/health
+router.get('/', getHealth);
+
+export default router;
+
+
+
+
+============================================================
+FILE: routes/index.js
+============================================================
+
+import { Router } from 'express';
+import healthRoutes from './health.routes.js';
+import authRoutes from './auth.routes.js';
+import jobRoutes from './job.routes.js';
+
+const router = Router();
+
+// Base API v1 routers
+router.use('/health', healthRoutes);
+router.use('/auth', authRoutes);
+router.use('/jobs', jobRoutes);
+
+export default router;
+
+
+
+
+
+============================================================
+FILE: routes/job.routes.js
+============================================================
+
+import { Router } from 'express';
+import { createJob, getAllJobs, updateJob, deleteJob, searchJobs } from '../controllers/job.controller.js';
+import { verifyAccessToken, authorizeRoles } from '../middlewares/auth.middleware.js';
+
+const router = Router();
+
+/**
+ * @route   POST /api/jobs
+ * @desc    Create a new job posting
+ * @access  Private (Recruiter only)
+ */
+router.post('/', verifyAccessToken, authorizeRoles('recruiter'), createJob);
+// Public route to retrieve all jobs
+router.get('/', getAllJobs);
+router.put('/:id', verifyAccessToken, authorizeRoles('recruiter'), updateJob);
+router.delete('/:id', verifyAccessToken, authorizeRoles('recruiter'), deleteJob);
+router.get('/search', searchJobs);
+export default router;
+
+
+
+
+============================================================
+FILE: server.js
+============================================================
+
+import dotenv from 'dotenv';
+import app from './app.js';
+import { connectDB } from './config/db.js';
+
+// Load environment variables
+dotenv.config();
+
+const PORT = process.env.PORT || 5000;
+
+const startServer = async () => {
+  // 1. Connect to Database
+  await connectDB();
+
+  // 2. Start HTTP Server
+  app.listen(PORT, () => {
+    console.log(`[Server] Backend Native Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+    console.log(`http://localhost:${PORT}`)
+    console.log(`[Server] Health Endpoint: http://localhost:${PORT}/api/v1/health`);
+  });
+};
+
+startServer();
+
+
+
+
+============================================================
+FILE: services/auth.service.js
+============================================================
+
+import bcrypt from 'bcryptjs';
+import { generateOtp } from '../utils/otp.util.js';
+import {
+  generateSignupToken,
+  generateAccessToken,
+  generateRefreshToken,
+} from '../utils/jwt.util.js';
+import { sendOtpEmail } from '../utils/mailer.util.js';
+import {
+  createOrReplaceOtp,
+  findOtpByEmail,
+  markAsVerified,
+  deleteOtpsByEmail,
+} from '../repositories/otp.repository.js';
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  updateRefreshToken,
+} from '../repositories/user.repository.js';
+
+/**
+ * Request OTP for email verification / signup
+ * @param {string} email - Target email address
+ */
+export const requestOtp = async (email) => {
+  console.log("in service")
+  if (!email || typeof email !== 'string') {
+    const error = new Error('A valid email address is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanEmail = email.trim();
+  
+  // Case-insensitive email format validation (preserves exact case)
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+  if (!emailRegex.test(cleanEmail)) {
+    const error = new Error('Invalid email format');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 1. Generate 6-digit cryptographically secure OTP (using crypto.randomInt)
+  const otp = generateOtp(6);
+  console.log(otp, "otp")
+
+  // 2. Set OTP expiration time (10 minutes from now)
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  // 3. Save OTP record to database
+  await createOrReplaceOtp({
+    email: cleanEmail,
+    otp,
+    expiresAt,
+  });
+
+  // 4. Send OTP email via Nodemailer
+  try {
+    await sendOtpEmail(cleanEmail, otp);
+  } catch (mailError) {
+    console.error('[AuthService] Nodemailer error:', mailError);
+    const error = new Error(`Failed to send OTP email: ${mailError.message}`);
+    error.statusCode = 500;
+    throw error;
+  }
+
+  // 5. Generate Signup Session JWT Token
+  const signupSessionToken = generateSignupToken({ email: cleanEmail });
+
+  // 6. Return response object
+  return {
+    message: 'OTP has been shared with your email.',
+    signupSessionToken,
+  };
+};
+
+/**
+ * Verify OTP submitted by user
+ * @param {string} email - Email attached to verified signup session token
+ * @param {string} otp - OTP code submitted by user
+ */
+export const verifyOtp = async (email, otp) => {
+  if (!otp || typeof otp !== 'string') {
+    const error = new Error('OTP is required for verification');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanOtp = otp.trim();
+
+  // 1. Retrieve the latest OTP record for this email
+  const otpRecord = await findOtpByEmail(email);
+
+  if (!otpRecord) {
+    const error = new Error('No active OTP request found for this email. Please request a new OTP.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 2. Check if OTP is expired
+  if (new Date(otpRecord.expiresAt) < new Date()) {
+    const error = new Error('OTP has expired. Please request a new OTP.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 3. Check if submitted OTP matches stored OTP
+  if (otpRecord.otp !== cleanOtp) {
+    const error = new Error('Invalid OTP code. Please check your email and try again.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 4. Mark OTP record as verified
+  await markAsVerified(otpRecord._id);
+
+  return {
+    message: 'OTP verified successfully.',
+  };
+};
+
+/**
+ * Register user after OTP verification
+ * @param {Object} params - { email, userName, password, role }
+ */
+export const registerUser = async ({ email, userName, password, role }) => {
+  if (!userName || typeof userName !== 'string' || !userName.trim()) {
+    const error = new Error('User name is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    const error = new Error('Password is required and must be at least 6 characters long');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!role || !['recruiter', 'candidate'].includes(role.toLowerCase())) {
+    const error = new Error('Role must be either "recruiter" or "candidate"');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanEmail = email.trim();
+  const cleanUserName = userName.trim();
+  const cleanRole = role.toLowerCase();
+
+  // 1. Check if an OTP record for this email exists and has been verified
+  const otpRecord = await findOtpByEmail(cleanEmail);
+  if (!otpRecord || !otpRecord.verified) {
+    const error = new Error('Email verification required. Please verify your OTP before signing up.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 2. Check if user with this email already exists
+  const existingUser = await findUserByEmail(cleanEmail);
+  if (existingUser) {
+    const error = new Error('A user with this email is already registered. Please login.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 3. Hash password using bcryptjs (salt rounds = 10)
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
+  // 4. Create user in database
+  const user = await createUser({
+    userName: cleanUserName,
+    email: cleanEmail,
+    password: hashedPassword,
+    role: cleanRole,
+  });
+
+  // 5. Generate Access Token (15m) and Refresh Token (30d)
+  const accessToken = generateAccessToken(
+    { id: user._id, email: user.email, role: user.role },
+    '15m'
+  );
+
+  const refreshToken = generateRefreshToken(
+    { id: user._id, email: user.email },
+    '30d'
+  );
+
+  // 6. Save Refresh Token in database User document
+  await updateRefreshToken(user._id, refreshToken);
+
+  // 7. Delete used OTP records for this email
+  await deleteOtpsByEmail(cleanEmail);
+
+  return {
+    user: {
+      id: user._id,
+      userName: user.userName,
+      email: user.email,
+      role: user.role,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
+
+/**
+ * Refresh Access Token using valid Refresh Token & database user check
+ * @param {string} userId - User ID extracted from verified Refresh Token
+ * @param {string} incomingRefreshToken - Refresh token submitted by client
+ */
+export const refreshAccessToken = async (userId, incomingRefreshToken) => {
+  if (!userId) {
+    const error = new Error('User ID is missing from token payload.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // 1. Fetch user from database to ensure user exists & get latest role/status
+  const user = await findUserById(userId);
+
+  if (!user) {
+    const error = new Error('User not found. Please log in again.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 2. Verify incoming refresh token matches the active refresh token in DB
+  if (user.refreshToken && incomingRefreshToken && user.refreshToken !== incomingRefreshToken) {
+    const error = new Error('Invalid or revoked refresh token. Please log in again.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // 3. Generate a fresh Access Token (15m expiry) with up-to-date user details
+  const accessToken = generateAccessToken(
+    { id: user._id, email: user.email, role: user.role },
+    '15m'
+  );
+
+  return {
+    accessToken,
+  };
+};
+
+
+
+
+============================================================
+FILE: services/health.service.js
+============================================================
+
+import { createLog } from '../repositories/health.repository.js';
+import mongoose from 'mongoose';
+
+/**
+ * Perform system health evaluation
+ */
+export const checkHealth = async () => {
+  const dbState = mongoose.connection.readyState;
+  const dbStatusMap = {
+    0: 'Disconnected',
+    1: 'Connected',
+    2: 'Connecting',
+    3: 'Disconnecting',
+  };
+
+  const statusInfo = {
+    server: 'UP',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    database: {
+      status: dbStatusMap[dbState] || 'Unknown',
+      connected: dbState === 1,
+    },
+  };
+
+  // Optionally try to record log if DB is connected
+  if (dbState === 1) {
+    try {
+      await createLog({
+        status: 'UP',
+        message: 'Server and DB health check OK',
+      });
+    } catch (err) {
+      console.warn(`[HealthService] Failed to write log: ${err.message}`);
+    }
+  }
+
+  return statusInfo;
+};
+
+
+
+
+============================================================
+FILE: services/job.service.js
+============================================================
+
+import { createJob as createJobRepository, getAllJobs as getAllJobsRepository, getJobById as getJobByIdRepository, updateJob as updateJobRepository, deleteJob as deleteJobRepository, searchJobs as searchJobsRepository } from '../repositories/job.repository.js';
+
+/**
+ * Post a new job opportunity (Recruiter only)
+ */
+export const postJob = async (recruiterId, jobData) => {
+  if (!recruiterId) {
+    const error = new Error('Recruiter ID is required to post a job');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!jobData || typeof jobData !== 'object') {
+    const error = new Error('Job data payload is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const {
+    title,
+    companyName,
+    companyWebsite,
+    contactEmail,
+    location,
+    employmentType,
+    experience,
+    salary,
+    skills,
+    description,
+    applicationStartDate,
+    applicationDeadline,
+  } = jobData;
+
+  // Basic validation checks
+  if (!title || typeof title !== 'string' || !title.trim()) {
+    const error = new Error('Job title is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!contactEmail || typeof contactEmail !== 'string' || !contactEmail.trim()) {
+    const error = new Error('Contact email is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!skills || !Array.isArray(skills) || skills.length === 0) {
+    const error = new Error('At least one mandatory skill must be specified');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!applicationStartDate) {
+    const error = new Error('Application start date is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!applicationDeadline) {
+    const error = new Error('Application deadline is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (new Date(applicationDeadline) <= new Date(applicationStartDate)) {
+    const error = new Error('Application deadline must be after application start date');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Construct job payload with recruiter reference
+  const payload = {
+    title: title.trim(),
+    companyName: companyName ? companyName.trim() : '',
+    companyWebsite: companyWebsite ? companyWebsite.trim() : '',
+    contactEmail: contactEmail.trim(),
+    location: location ? location.trim() : '',
+    employmentType: employmentType || 'Full-time',
+    experience: experience ? experience.trim() : '',
+    salary: salary ? salary.trim() : '',
+    skills,
+    description: description ? description.trim() : '',
+    applicationStartDate: new Date(applicationStartDate),
+    applicationDeadline: new Date(applicationDeadline),
+    recruiter: recruiterId,
+  };
+
+  const job = await createJobRepository(payload);
+  return job;
+};
+
+/**
+ * Retrieve all job postings (public)
+ * @returns {Promise<Array>} List of job documents
+ */
+export const getAllJobs = async () => {
+  const jobs = await getAllJobsRepository();
+  return jobs;
+};
+
+/**
+ * Update a job (owner only)
+ * @param {string} recruiterId - ID of the authenticated recruiter
+ * @param {string} jobId - ID of the job to update
+ * @param {Object} updateData - Fields to update
+ * @returns {Promise<Object>} Updated job document
+ */
+export const updateJob = async (recruiterId, jobId, updateData) => {
+  if (!recruiterId) {
+    const error = new Error('Recruiter ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!jobId) {
+    const error = new Error('Job ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const job = await getJobByIdRepository(jobId);
+  if (!job) {
+    const error = new Error('Job not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (job.recruiter.toString() !== recruiterId) {
+    const error = new Error('Unauthorized: you are not the owner of this job');
+    error.statusCode = 403;
+    throw error;
+  }
+  const updatedJob = await updateJobRepository(jobId, updateData);
+  return updatedJob;
+};
+
+/**
+ * Delete a job (owner only)
+ * @param {string} recruiterId - ID of the authenticated recruiter
+ * @param {string} jobId - ID of the job to delete
+ * @returns {Promise<Object>} Deleted job document
+ */
+export const deleteJob = async (recruiterId, jobId) => {
+  if (!recruiterId) {
+    const error = new Error('Recruiter ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!jobId) {
+    const error = new Error('Job ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+  const job = await getJobByIdRepository(jobId);
+  if (!job) {
+    const error = new Error('Job not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  if (job.recruiter.toString() !== recruiterId) {
+    const error = new Error('Unauthorized: you are not the owner of this job');
+    error.statusCode = 403;
+    throw error;
+  }
+  const deletedJob = await deleteJobRepository(jobId);
+  return deletedJob;
+};
+
+/**
+ * Search jobs by title and/or location (public)
+ * @param {Object} filters - May contain title and/or location strings
+ * @returns {Promise<Array>} List of matching job documents
+ */
+export const searchJobs = async (filters) => {
+  // Ensure filters is an object
+  if (!filters || typeof filters !== 'object') {
+    const error = new Error('Filters must be provided as an object');
+    error.statusCode = 400;
+    throw error;
+  }
+  // Delegates to repository
+  const jobs = await searchJobsRepository(filters);
+  return jobs;
+};
+
+
+
+
+============================================================
+FILE: utils/jwt.util.js
+============================================================
+
+import jwt from 'jsonwebtoken';
+
+/**
+ * Generate a JWT Signup Session token for user OTP verification flow
+ * @param {Object} payload - Data to embed in token (e.g., { email })
+ * @param {string} expiresIn - Expiry duration (default: '15m')
+ * @returns {string} Signed JWT token
+ */
+export const generateSignupToken = (payload, expiresIn = '15m') => {
+  const secret = process.env.JWT_SIGNUP_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SIGNUP_SECRET is not defined in environment variables');
+  }
+
+  return jwt.sign(
+    { ...payload, purpose: 'signup_otp_verification' },
+    secret,
+    { expiresIn }
+  );
+};
+
+/**
+ * Verify a JWT Signup Session token
+ * @param {string} token 
+ * @returns {Object} Decoded token payload
+ */
+export const verifySignupToken = (token) => {
+  const secret = process.env.JWT_SIGNUP_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SIGNUP_SECRET is not defined in environment variables');
+  }
+
+  return jwt.verify(token, secret);
+};
+
+/**
+ * Generate JWT Access Token (default: 15 minutes)
+ * @param {Object} payload - User data (id, email, role)
+ * @param {string} expiresIn - Expiry duration (default: '15m')
+ * @returns {string} Signed JWT Access Token
+ */
+export const generateAccessToken = (payload, expiresIn = '15m') => {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) {
+    throw new Error('JWT_ACCESS_SECRET is not defined in environment variables');
+  }
+
+  return jwt.sign(payload, secret, { expiresIn });
+};
+
+/**
+ * Verify JWT Access Token
+ * @param {string} token 
+ * @returns {Object} Decoded user payload
+ */
+export const verifyAccessToken = (token) => {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) {
+    throw new Error('JWT_ACCESS_SECRET is not defined in environment variables');
+  }
+
+  return jwt.verify(token, secret);
+};
+
+/**
+ * Generate JWT Refresh Token (default: 30 days / 1 month)
+ * @param {Object} payload - User data (id, email)
+ * @param {string} expiresIn - Expiry duration (default: '30d')
+ * @returns {string} Signed JWT Refresh Token
+ */
+export const generateRefreshToken = (payload, expiresIn = '30d') => {
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) {
+    throw new Error('JWT_REFRESH_SECRET is not defined in environment variables');
+  }
+
+  return jwt.sign(payload, secret, { expiresIn });
+};
+
+/**
+ * Verify JWT Refresh Token
+ * @param {string} token 
+ * @returns {Object} Decoded user payload
+ */
+export const verifyRefreshToken = (token) => {
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) {
+    throw new Error('JWT_REFRESH_SECRET is not defined in environment variables');
+  }
+
+  return jwt.verify(token, secret);
+};
+
+
+
+
+============================================================
+FILE: utils/mailer.util.js
+============================================================
+
+import nodemailer from 'nodemailer';
+
+/**
+ * Create Nodemailer transporter from environment variables
+ */
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+};
+
+/**
+ * Send OTP to user's email address
+ * @param {string} toEmail - Recipient email
+ * @param {string} otp - 6-digit OTP code
+ */
+export const sendOtpEmail = async (toEmail, otp) => {
+  const transporter = createTransporter();
+
+  const mailOptions = {
+    from: `"${process.env.EMAIL_FROM || 'Backend Native'}" <${process.env.SMTP_USER}>`,
+    to: toEmail,
+    subject: 'Your Verification Code (OTP)',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+        <h2 style="color: #333333; text-align: center;">Account Verification</h2>
+        <p style="color: #555555; font-size: 16px;">Hello,</p>
+        <p style="color: #555555; font-size: 16px;">Your verification code for signup is:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #4F46E5; background-color: #EEF2FF; padding: 10px 25px; border-radius: 6px; border: 1px dashed #6366F1;">
+            ${otp}
+          </span>
+        </div>
+        <p style="color: #777777; font-size: 14px;">This OTP is valid for 10 minutes. Please do not share this code with anyone.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
+        <p style="color: #aaa; font-size: 12px; text-align: center;">Backend Native Authentication System</p>
+      </div>
+    `,
+  };
+
+  return await transporter.sendMail(mailOptions);
+};
+
+
+
+
+============================================================
+FILE: utils/otp.util.js
+============================================================
+
+import crypto from 'crypto';
+
+/**
+ * Generate a cryptographically secure numeric OTP of specified length (default 6 digits)
+ * Uses Node.js native crypto.randomInt instead of Math.random()
+ * @param {number} length - Number of digits (default: 6)
+ * @returns {string} - Generated OTP string (e.g. "482910")
+ */
+export const generateOtp = (length = 6) => {
+  const min = Math.pow(10, length - 1);
+  const max = Math.pow(10, length) - 1;
+  const otpNumber = crypto.randomInt(min, max + 1);
+  return otpNumber.toString();
+};
+
+
+
