@@ -66,7 +66,7 @@ export const verifyAccessToken = (req, res, next) => {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.split(' ')[1];
     }
-
+    
     // 2. Fallback to x-access-token header
     if (!token) {
       token = req.headers['x-access-token'];

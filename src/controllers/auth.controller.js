@@ -3,6 +3,8 @@ import {
   verifyOtp as verifyOtpService,
   registerUser as registerUserService,
   refreshAccessToken as refreshAccessTokenService,
+  loginUser as loginUserService,
+  logoutUser as logoutUserService,
 } from '../services/auth.service.js';
 
 /**
@@ -71,6 +73,45 @@ export const register = async (req, res, next) => {
 };
 
 /**
+ * POST /api/auth/login
+ * User login with email and password
+ */
+export const login = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    const result = await loginUserService({ email, password });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Login successful.',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/auth/logout
+ * Logout user (requires verified Access Token)
+ */
+export const logout = async (req, res, next) => {
+  try {
+    const userId = req.userId; // Extracted by verifyAccessToken middleware
+
+    const result = await logoutUserService(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/auth/refresh-token
  * Generate a new Access Token using a verified Refresh Token
  */
@@ -90,3 +131,5 @@ export const refreshToken = async (req, res, next) => {
     next(error);
   }
 };
+
+

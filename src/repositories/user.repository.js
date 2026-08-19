@@ -22,6 +22,13 @@ export const findUserByEmail = async (email) => {
 };
 
 /**
+ * Find user by email address including password field
+ */
+export const findUserByEmailWithPassword = async (email) => {
+  return await UserModel.findOne({ email }).select('+password');
+};
+
+/**
  * Find user by ID
  */
 export const findUserById = async (id) => {

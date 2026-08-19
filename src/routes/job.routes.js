@@ -11,7 +11,7 @@ const router = Router();
  */
 router.post('/', verifyAccessToken, authorizeRoles('recruiter'), createJob);
 // Public route to retrieve all jobs
-router.get('/', getAllJobs);
+router.get('/', verifyAccessToken, getAllJobs);
 router.put('/:id', verifyAccessToken, authorizeRoles('recruiter'), updateJob);
 router.delete('/:id', verifyAccessToken, authorizeRoles('recruiter'), deleteJob);
 router.get('/search', searchJobs);

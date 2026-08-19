@@ -15,6 +15,7 @@ import {
 import {
   createUser,
   findUserByEmail,
+  findUserByEmailWithPassword,
   findUserById,
   updateRefreshToken,
 } from '../repositories/user.repository.js';
@@ -226,7 +227,7 @@ export const refreshAccessToken = async (userId, incomingRefreshToken) => {
   }
 
   // 2. Verify incoming refresh token matches the active refresh token in DB
-  if (user.refreshToken && incomingRefreshToken && user.refreshToken !== incomingRefreshToken) {
+  if (!user.refreshToken || user.refreshToken !== incomingRefreshToken) {
     const error = new Error('Invalid or revoked refresh token. Please log in again.');
     error.statusCode = 401;
     throw error;
@@ -242,3 +243,85 @@ export const refreshAccessToken = async (userId, incomingRefreshToken) => {
     accessToken,
   };
 };
+
+/**
+ * Login user with email and password
+ * @param {Object} params - { email, password }
+ */
+export const loginUser = async ({ email, password }) => {
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    const error = new Error('Email is required for login');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!password || typeof password !== 'string') {
+    const error = new Error('Password is required for login');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanEmail = email.trim();
+
+  // 1. Fetch user from database including password hash
+  const user = await findUserByEmailWithPassword(cleanEmail);
+  if (!user) {
+    const error = new Error('Invalid email or password');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // 2. Compare provided password with hashed password stored in DB
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) {
+    const error = new Error('Invalid email or password');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // 3. Generate Access Token (15m) and Refresh Token (30d)
+  const accessToken = generateAccessToken(
+    { id: user._id, email: user.email, role: user.role },
+    '15m'
+  );
+
+  const refreshToken = generateRefreshToken(
+    { id: user._id, email: user.email },
+    '30d'
+  );
+
+  // 4. Save Refresh Token in database User document
+  await updateRefreshToken(user._id, refreshToken);
+
+  return {
+    user: {
+      id: user._id,
+      userName: user.userName,
+      email: user.email,
+      role: user.role,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
+
+/**
+ * Logout user by clearing their stored refresh token in DB
+ * @param {string} userId - User ID from verified access token
+ */
+export const logoutUser = async (userId) => {
+  if (!userId) {
+    const error = new Error('User ID is required for logout');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Clear refresh token in DB
+  await updateRefreshToken(userId, null);
+
+  return {
+    message: 'Logged out successfully.',
+  };
+};
+
+
