@@ -5,6 +5,7 @@ import {
   refreshAccessToken as refreshAccessTokenService,
   loginUser as loginUserService,
   logoutUser as logoutUserService,
+  getUserProfile as getUserProfileService,
 } from '../services/auth.service.js';
 
 /**
@@ -112,6 +113,26 @@ export const logout = async (req, res, next) => {
 };
 
 /**
+ * GET /api/auth/me or GET /api/auth/user
+ * Get current authenticated user profile (requires verified Access Token)
+ */
+export const getUser = async (req, res, next) => {
+  try {
+    const userId = req.userId; // From verifyAccessToken middleware
+
+    const user = await getUserProfileService(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'User profile retrieved successfully.',
+      data: user,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/auth/refresh-token
  * Generate a new Access Token using a verified Refresh Token
  */
@@ -131,5 +152,6 @@ export const refreshToken = async (req, res, next) => {
     next(error);
   }
 };
+
 
 

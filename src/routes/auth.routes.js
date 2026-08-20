@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requestOtp, verifyOtp, register, login, logout, refreshToken } from '../controllers/auth.controller.js';
+import { requestOtp, verifyOtp, register, login, logout, getUser, refreshToken } from '../controllers/auth.controller.js';
 import { verifySignupSession, verifyAccessToken, verifyRefreshToken } from '../middlewares/auth.middleware.js';
 
 const router = Router();
@@ -19,9 +19,14 @@ router.post('/login', login);
 // POST /api/auth/logout - Logout user (requires verified Access Token)
 router.post('/logout', verifyAccessToken, logout);
 
+// GET /api/auth/me & GET /api/auth/user - Get current user profile
+router.get('/me', verifyAccessToken, getUser);
+// router.get('/user', verifyAccessToken, getUser);
+
 // POST /api/auth/refresh-token - Refresh Access Token (requires valid Refresh Token)
 router.post('/refresh-token', verifyRefreshToken, refreshToken);
 
 export default router;
+
 
 

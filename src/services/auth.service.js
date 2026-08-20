@@ -42,6 +42,14 @@ export const requestOtp = async (email) => {
     throw error;
   }
 
+  const isUserExist = await findUserByEmail(email);
+  if(isUserExist) {
+    console.log(isUserExist, "user")
+    const error = new Error('User already Exists');
+    error.statusCode = 409;
+    throw error;
+  }
+
   // 1. Generate 6-digit cryptographically secure OTP (using crypto.randomInt)
   const otp = generateOtp(6);
   console.log(otp, "otp")
@@ -195,7 +203,6 @@ export const registerUser = async ({ email, userName, password, role }) => {
 
   return {
     user: {
-      id: user._id,
       userName: user.userName,
       email: user.email,
       role: user.role,
@@ -323,5 +330,34 @@ export const logoutUser = async (userId) => {
     message: 'Logged out successfully.',
   };
 };
+
+/**
+ * Get profile information of the currently authenticated user
+ * @param {string} userId - User ID from verified access token
+ * @returns {Promise<Object>} Sanitized user profile data
+ */
+export const getUserProfile = async (userId) => {
+  if (!userId) {
+    const error = new Error('User ID is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const user = await findUserById(userId);
+
+  if (!user) {
+    const error = new Error('User not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    id: user._id,
+    userName: user.userName,
+    email: user.email,
+    role: user.role,
+  };
+};
+
 
 
