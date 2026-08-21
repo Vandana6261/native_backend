@@ -302,7 +302,6 @@ export const loginUser = async ({ email, password }) => {
 
   return {
     user: {
-      id: user._id,
       userName: user.userName,
       email: user.email,
       role: user.role,
