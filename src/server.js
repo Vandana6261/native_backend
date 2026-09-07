@@ -12,7 +12,7 @@ const startServer = async () => {
   await connectDB();
 
   // 2. Start HTTP Server
-  app.listen(PORT, () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Server] Backend Native Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
     console.log(`http://localhost:${PORT}`)
     console.log(`[Server] Health Endpoint: http://localhost:${PORT}/api/v1/health`);
